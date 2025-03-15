@@ -1,0 +1,1 @@
+a project to calculuate pi on multiple servers at the same time. uses the chudnovsky approximation algorithem to approximate pi.
