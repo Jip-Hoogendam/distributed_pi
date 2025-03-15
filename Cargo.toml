@@ -1,7 +1,0 @@
-[package]
-name = "distributed_pi_project"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-rug = "1.27.0"

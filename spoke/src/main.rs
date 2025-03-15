@@ -1,10 +1,15 @@
 
 use std::time::SystemTime;
-use std::fs;
+use std::{fs, result};
+use std::io::prelude::*;
+use std::net::TcpStream;
+use std::{io::{Read, Write}, net::TcpListener};
+use rug::float;
+use serde::{Deserialize,Serialize};
 
 //pi calculation based on the wikipedia artivle on the chudnovsky algorithem
 mod pi_calc{
-    static DEFINED_PERCICION : u32 = 1000000;
+    static DEFINED_PERCICION : u32 = 100000000;
 
     use std::{collections::VecDeque, sync::mpsc, thread};
 
@@ -17,7 +22,7 @@ mod pi_calc{
            let pab = Integer::from(-(6*a - 5)*(2*a - 1)*(6*a - 1));
            let qab = Integer::from(10939058860032000 * a.pow(3));
            let rab = Integer::from(&pab * (545140134*a + 13591409));
-           return  (pab, qab, rab);
+           (pab, qab, rab)
         }else{
             let m = (a + b) / 2;
             let (pam, qam, ram) = bin_split(a, m);
@@ -26,7 +31,7 @@ mod pi_calc{
             let pab = &pam * pmb;
             let qab = qam * &qmb;
             let rab = qmb * ram + pam * rmb;
-            return  (pab, qab, rab);
+            (pab, qab, rab)
         }
     }
 
@@ -46,7 +51,7 @@ mod pi_calc{
                 depth -= 1;
                 break;
             }
-            depth += 1;
+            depth += 1; 
         }
 
 
@@ -114,7 +119,7 @@ mod pi_calc{
                 reconstruction_array.push_back((pab, qab, rab));
             }
         }
-        return reconstruction_array.get(0).unwrap().clone();
+        reconstruction_array.front().unwrap().clone()
     }
 
     //runs the chudnovsky algorithem where n is the percision number
@@ -126,32 +131,69 @@ mod pi_calc{
 
 
 
+//used for passing task between services
+#[derive(Serialize, Deserialize, Debug)]
+struct TaskPass{
+    start: i128,
+    end: i128,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ComputeResult{
+    data: String
+}
+
+
 fn main() {
+    let mut stream = TcpStream::connect("127.0.0.1:13021").unwrap();
 
-    //reads in a verification file to see if it correct
-    println!("reading veri_pi(thihi).txt");
+    let responce: &mut [u8] = &mut [0;128];
+    let _ = stream.read(responce).unwrap();
 
-    let contents: Vec<char> = fs::read_to_string("./veri_pi(thihi).txt")
-        .expect("Should have been able to read the file").chars().collect();
+    let deserilized_value: TaskPass = rmp_serde::from_read(&*responce).unwrap();
+    println!("got {:?}", deserilized_value);
+    let result_value = deserilized_value.start + deserilized_value.end;
+    
+    std::thread::sleep(std::time::Duration::from_millis(3000));
 
-    let now = SystemTime::now();
-    println!("starting the pi calculations");
-    let calculated_pi: Vec<char> = pi_calc::chudnovsky(10000000).to_string().chars().collect();
-
-
-    let elapsed_seconds = match now.elapsed() {
-        Ok(value) => value.as_secs_f64(),
-        Err(_) => panic!("system time error"),
-    };
-    println!("calculated pi in {} seconds", elapsed_seconds);    
+    let _ = stream.write(&rmp_serde::to_vec(&ComputeResult{data: result_value.to_string()}).unwrap()).unwrap();
 
     
-    for (index,number) in calculated_pi.into_iter().enumerate(){
-        if number == contents[index]{
-            print!("\x1b[92m{}",number);
-        }else{
-            print!("\x1b[91m{}",number);
-        }
-    }
-    println!("\x1b[0m");
+
+
+
+    // //reads in a verification file to see if it correct
+    // println!("reading veri_pi(thihi).txt");
+
+    // let contents: Vec<char> = fs::read_to_string("../veri_pi(thihi).txt")
+    //     .expect("Should have been able to read the file").chars().collect();
+
+    // let now = SystemTime::now();
+    // println!("starting the pi calculations");
+    // let calculated_pi: Vec<char> = pi_calc::chudnovsky(5000000).to_string().chars().collect();
+
+
+    // let elapsed_seconds = match now.elapsed() {
+    //     Ok(value) => value.as_secs_f64(),
+    //     Err(_) => panic!("system time error"),
+    // };
+    // println!("calculated pi in {} seconds", elapsed_seconds);    
+
+    
+    // for (index,number) in calculated_pi.into_iter().enumerate(){
+    //     match contents.get(index) {
+    //         Some(char) => {
+    //             if number == *char{
+    //                 print!("\x1b[92m{}",number);
+    //             }else{
+    //                 print!("\x1b[91m{}",number);
+    //             }
+    //         }
+    //         None => {
+    //             print!("\x1b[93m{}",number);
+    //         }
+    //     }; 
+        
+    // }
+    // println!("\x1b[0m");
 }
