@@ -1,22 +1,20 @@
 
-use std::time::SystemTime;
-use std::{fs, result};
-use std::io::prelude::*;
+use std::{sync::mpsc, thread};
 use std::net::TcpStream;
-use std::{io::{Read, Write}, net::TcpListener};
-use rug::float;
+use std::io::{Error, ErrorKind, Read, Write};
+
 use serde::{Deserialize,Serialize};
+
+//for possible compatibility issues
+const API_VERSION: usize = 1;
+
 
 //pi calculation based on the wikipedia artivle on the chudnovsky algorithem
 mod pi_calc{
-    static DEFINED_PERCICION : u32 = 100000000;
-
-    use std::{collections::VecDeque, sync::mpsc, thread};
-
-    use rug::{Float, Integer};
+    use rug::Integer;
 
     //an binay split algorithem
-    fn bin_split(a: i128, b:i128) -> (rug::Integer,rug::Integer,rug::Integer){
+    pub fn bin_split(a: i128, b:i128) -> (rug::Integer,rug::Integer,rug::Integer){
         if b == a + 1{
 
            let pab = Integer::from(-(6*a - 5)*(2*a - 1)*(6*a - 1));
@@ -34,166 +32,111 @@ mod pi_calc{
             (pab, qab, rab)
         }
     }
-
-    //used to store the result and the ranges that it must compute with.
-    struct BinaryReconstruction{
-        input: (i128,i128),
-        value: (rug::Integer,rug::Integer,rug::Integer)
-    }
-
-    //less memory efficiant version.that is likely faster
-    fn fast_bin_split(n: i128, thread_count: u8) -> (rug::Integer,rug::Integer,rug::Integer){
-
-        //stores the depht at witch the depth is enough to fit the amout of threads
-        let mut depth: u8 = 0;
-        loop {
-            if depth.pow(2) > thread_count{
-                depth -= 1;
-                break;
-            }
-            depth += 1; 
-        }
-
-
-        //the root of the reconstructed binary split
-        let root_reconstruction = BinaryReconstruction{input: (1,n),value: (Integer::from(0),Integer::from(0),Integer::from(0))};
-
-        //splits the cases with the desired lengths.
-        let mut reconstruction_array: VecDeque<BinaryReconstruction> = vec![].into();
-        reconstruction_array.push_back(root_reconstruction);
-        for _ in 0..depth{
-            let length =reconstruction_array.len();
-            for _ in 0..length{
-                let bin_split = reconstruction_array.pop_front().unwrap();
-                let a = bin_split.input.0;
-                let b = bin_split.input.1;
-
-                //cant solve it if the number of approximations is too small.
-                if b == a + 1{
-                    panic!("n is set too low for the fast bin split algorithem");
-                }
-
-                let m = (a + b) / 2;
-                let bin_reconstruction_1 = BinaryReconstruction{input: (a,m),value: (Integer::from(0),Integer::from(0),Integer::from(0))};
-                reconstruction_array.push_back(bin_reconstruction_1);
-                let bin_reconstruction_2 = BinaryReconstruction{input: (m,b),value: (Integer::from(0),Integer::from(0),Integer::from(0))};
-                reconstruction_array.push_back(bin_reconstruction_2);
-            }
-        }
-
-        let mut threads = vec![];
-        let mut return_channels = vec![];
-
-
-        //spawns the threads to search the binay ranges given.
-        for mut bin_recon in reconstruction_array{
-            let (tx,rx) = mpsc::channel();
-            return_channels.push(rx);
-            threads.push(thread::spawn(move || {
-                bin_recon.value = bin_split(bin_recon.input.0, bin_recon.input.1);
-                tx.send(bin_recon.value).unwrap();
-            }));
-        }
-        
-
-        for thread in threads{
-            thread.join().unwrap();
-        }
-
-        let mut reconstruction_array: VecDeque<(Integer, Integer, Integer)> = vec![].into();
-
-        for channel in return_channels{
-            reconstruction_array.push_back(channel.recv().unwrap());
-        }
-
-
-        //continuasly rebuilds the threads given untill there is one left.
-        while reconstruction_array.len() > 1{
-            let length =reconstruction_array.len();
-            for _ in 0..length/2{
-                let (pam, qam, ram) = reconstruction_array.pop_front().unwrap();
-                let (pmb, qmb, rmb) = reconstruction_array.pop_front().unwrap();
-                let pab = &pam * pmb;
-                let qab = qam * &qmb;
-                let rab = qmb * ram + pam * rmb;
-                reconstruction_array.push_back((pab, qab, rab));
-            }
-        }
-        reconstruction_array.front().unwrap().clone()
-    }
-
-    //runs the chudnovsky algorithem where n is the percision number
-    pub fn chudnovsky(n: i128) -> rug::Float{
-        let (_p1n, q1n, r1n) = fast_bin_split(n, 16);
-        (426880.0 * Float::with_val(DEFINED_PERCICION, 10005).sqrt() * &q1n) / (13591409*q1n + r1n)
-    }
 }
 
 
 
-//used for passing task between services
+//used to send the tasks for the spokes
 #[derive(Serialize, Deserialize, Debug)]
-struct TaskPass{
-    start: i128,
-    end: i128,
+enum TaskPass {
+    Data(Vec<(i128, i128)>),
 }
-
 #[derive(Serialize, Deserialize, Debug)]
 struct ComputeResult{
-    data: String
+    result: Vec<(String, String, String)>
 }
 
 
+#[derive(Serialize)]
+struct SystemInfo{
+    api_version: usize,
+    cores: usize,
+}
+
+//compute handeler
+fn computation_handeler(stream: &mut TcpStream) -> Result<(), Error>{
+    let deserilized_value: TaskPass = ciborium::from_reader(&*stream).unwrap();
+    println!("got tasks : {:?}", deserilized_value);
+    let TaskPass::Data(result_value) = deserilized_value;
+    
+
+    //starts the threads on the given data
+    let mut threads = vec![];
+    let mut return_channels = vec![];
+
+
+    //spawns the threads to search the binay ranges given.
+    for bin_recon in result_value{
+        let (tx,rx) = mpsc::channel();
+        return_channels.push(rx);
+        threads.push(thread::spawn(move || {
+            let result = pi_calc::bin_split(bin_recon.0, bin_recon.1);
+            tx.send(result).unwrap();
+        }));
+    }
+    
+
+    for thread in threads{
+        thread.join().unwrap();
+    }
+
+    let mut return_array_string = vec![];
+
+    for channel in return_channels{
+        let (pab, qab, rab) = channel.recv().unwrap();
+        return_array_string.push((pab.to_string(), qab.to_string(), rab.to_string()));
+    }
+
+
+    ciborium::into_writer(&ComputeResult{result: return_array_string}, stream);
+    
+    println!("my job is done");
+    Ok(())
+}
+
 fn main() {
-    let mut stream = TcpStream::connect("127.0.0.1:13021").unwrap();
+    let system_info = SystemInfo{api_version: API_VERSION, cores: 4};
 
-    let responce: &mut [u8] = &mut [0;128];
-    let _ = stream.read(responce).unwrap();
+    loop {
+        let mut stream = loop{
+            match TcpStream::connect("127.0.0.1:13021"){
+                Ok(stream) => break stream,
+                Err(e) => {
+                    match e.kind(){
+                        ErrorKind::NetworkDown => panic!("network is down"),
+                        ErrorKind::ConnectionRefused => {
+                            println!("connection failed. Retrying in 5 seconds");
 
-    let deserilized_value: TaskPass = rmp_serde::from_read(&*responce).unwrap();
-    println!("got {:?}", deserilized_value);
-    let result_value = deserilized_value.start + deserilized_value.end;
-    
-    std::thread::sleep(std::time::Duration::from_millis(3000));
+                            let five_seconds = std::time::Duration::from_millis(5000);
+                            thread::sleep(five_seconds);
+                            continue;
+                        },
+                        _ => panic!("unkown error : \n{}", e)
+                    }
+                } 
+            }
+            
+        };
+        println!("connected to hub");
 
-    let _ = stream.write(&rmp_serde::to_vec(&ComputeResult{data: result_value.to_string()}).unwrap()).unwrap();
+        match ciborium::into_writer(&system_info, &stream){
+            Ok(value) => value,
+            Err(_) =>{
+                println!("seems like the connection messed up restting the connection");
+                let _ =stream.shutdown(std::net::Shutdown::Both);
+                continue;
+            }
+        };
 
-    
-
-
-
-    // //reads in a verification file to see if it correct
-    // println!("reading veri_pi(thihi).txt");
-
-    // let contents: Vec<char> = fs::read_to_string("../veri_pi(thihi).txt")
-    //     .expect("Should have been able to read the file").chars().collect();
-
-    // let now = SystemTime::now();
-    // println!("starting the pi calculations");
-    // let calculated_pi: Vec<char> = pi_calc::chudnovsky(5000000).to_string().chars().collect();
-
-
-    // let elapsed_seconds = match now.elapsed() {
-    //     Ok(value) => value.as_secs_f64(),
-    //     Err(_) => panic!("system time error"),
-    // };
-    // println!("calculated pi in {} seconds", elapsed_seconds);    
-
-    
-    // for (index,number) in calculated_pi.into_iter().enumerate(){
-    //     match contents.get(index) {
-    //         Some(char) => {
-    //             if number == *char{
-    //                 print!("\x1b[92m{}",number);
-    //             }else{
-    //                 print!("\x1b[91m{}",number);
-    //             }
-    //         }
-    //         None => {
-    //             print!("\x1b[93m{}",number);
-    //         }
-    //     }; 
-        
-    // }
-    // println!("\x1b[0m");
+        loop{
+            match computation_handeler(&mut stream){
+                Ok(value) => value,
+                Err(_) =>{
+                    println!("seems like the connection messed up restting the connection");
+                    let _ =stream.shutdown(std::net::Shutdown::Both);
+                    break;
+                }
+            }
+        }
+    }
 }
