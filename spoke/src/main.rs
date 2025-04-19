@@ -1,12 +1,13 @@
 
 use std::{sync::mpsc, thread};
 use std::net::TcpStream;
-use std::io::{Error, ErrorKind, Read, Write};
+use std::io::{Error, ErrorKind};
 
+use rug::Integer;
 use serde::{Deserialize,Serialize};
 
 //for possible compatibility issues
-const API_VERSION: usize = 1;
+const API_VERSION: usize = 3;
 
 
 //pi calculation based on the wikipedia artivle on the chudnovsky algorithem
@@ -43,7 +44,7 @@ enum TaskPass {
 }
 #[derive(Serialize, Deserialize, Debug)]
 struct ComputeResult{
-    result: Vec<(String, String, String)>
+    result: (Integer, Integer, Integer)
 }
 
 
@@ -80,15 +81,28 @@ fn computation_handeler(stream: &mut TcpStream) -> Result<(), Error>{
         thread.join().unwrap();
     }
 
-    let mut return_array_string = vec![];
+    let mut results = vec![];
 
     for channel in return_channels{
         let (pab, qab, rab) = channel.recv().unwrap();
-        return_array_string.push((pab.to_string(), qab.to_string(), rab.to_string()));
+        results.push((pab, qab, rab));
+    }
+
+    //continuasly rebuilds the threads given untill there is one left.
+    while results.len() > 1{
+        let length =results.len();
+        for _ in 0..length/2{
+            let (pam, qam, ram) = results.pop().unwrap();
+            let (pmb, qmb, rmb) = results.pop().unwrap();
+            let pab = &pam * pmb;
+            let qab = qam * &qmb;
+            let rab = qmb * ram + pam * rmb;
+            results.push((pab, qab, rab));
+        }
     }
 
 
-    ciborium::into_writer(&ComputeResult{result: return_array_string}, stream);
+    let _ = ciborium::into_writer(&ComputeResult{result: results.pop().unwrap()}, stream);
     
     println!("my job is done");
     Ok(())

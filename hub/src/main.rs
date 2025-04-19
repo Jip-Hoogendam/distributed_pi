@@ -1,4 +1,4 @@
-use std::{io::{stdout,Read, Write}, net::{TcpListener, TcpStream}, thread::sleep};
+use std::{io::{stdout, Write}, net::{TcpListener, TcpStream}, thread::sleep};
 use serde::{Deserialize,Serialize};
 use std::time::SystemTime;
 use std::fs;
@@ -10,7 +10,7 @@ use std::sync::mpsc::TryRecvError;
 use std::thread;
 
 //for possible compatibility issues
-const API_VERSION:usize = 1;
+const API_VERSION:usize = 3;
 
 
 //used to send the tasks for the spokes
@@ -52,7 +52,6 @@ struct SystemInfo{
 //pi calculation based on the wikipedia artivle on the chudnovsky algorithem
 mod pi_calc{
 
-    use std::{collections::VecDeque, io::{Read, Write}, str::FromStr};
 
     use rug::{Float, Integer};
     use serde::{Serialize,Deserialize};
@@ -61,8 +60,9 @@ mod pi_calc{
 
     #[derive(Serialize, Deserialize, Debug)]
     struct ComputeResult{
-        result: Vec<(String, String, String)>
+        result: (Integer, Integer, Integer)
     }
+
 
     //an binay split algorithem
     fn bin_split(a: i128, b:i128) -> (rug::Integer,rug::Integer,rug::Integer){
@@ -93,43 +93,29 @@ mod pi_calc{
 
         let mut thread_count = 0;
         for connection in &mut *connections{
-            thread_count += connection.threads;
+            thread_count += connection.threads as usize;
         }
 
-        //stores the depht at witch the depth is enough to fit the amout of threads
-        let mut depth: u16 = 0;
+
+        //makes shure the tasks can be sent out
+        let mut iterations = n;
         loop {
-            if depth.pow(2) > thread_count{
+            iterations += iterations % 2;
+            iterations += iterations % thread_count as i128;
+            if iterations % 2 == 0{
                 break;
             }
-            depth += 1;
         }
 
+        let n = iterations;
+        let chunks = n as usize / thread_count;
 
-        //the root of the reconstructed binary split
-        let root_reconstruction = BinaryReconstruction{input: (1,n)};
 
         //splits the cases with the desired lengths.
-        let mut reconstruction_array: VecDeque<BinaryReconstruction> = vec![].into();
-        reconstruction_array.push_back(root_reconstruction);
-        for _ in 0..depth{
-            let length =reconstruction_array.len();
-            for _ in 0..length{
-                let bin_split = reconstruction_array.pop_front().unwrap();
-                let a = bin_split.input.0;
-                let b = bin_split.input.1;
-
-                //cant solve it if the number of approximations is too small.
-                if b == a + 1{
-                    panic!("n is set too low for the fast bin split algorithem");
-                }
-
-                let m = (a + b) / 2;
-                let bin_reconstruction_1 = BinaryReconstruction{input: (a,m)};
-                reconstruction_array.push_back(bin_reconstruction_1);
-                let bin_reconstruction_2 = BinaryReconstruction{input: (m,b)};
-                reconstruction_array.push_back(bin_reconstruction_2);
-            }
+        let mut reconstruction_array: Vec<BinaryReconstruction> = vec![];
+        
+        for i in 0..thread_count{
+            reconstruction_array.push(BinaryReconstruction { input: ((i * chunks + 1) as i128, ((i + 1) * chunks + 1) as i128) });
         }
 
         let target_threads = (reconstruction_array.len() as f32/connections.len()as f32).ceil() as usize;
@@ -137,19 +123,19 @@ mod pi_calc{
         for connection in &mut *connections {
             let mut task = vec![];
             for _ in 0..target_threads{
-                let value = match reconstruction_array.pop_front(){
+                let value = match reconstruction_array.pop(){
                     Some(value) => value,
                     None => break,
                 };
                 task.push(value.input);
             }
 
-            ciborium::into_writer(&TaskPass::Data(task), &connection.socket);
+            let _ = ciborium::into_writer(&TaskPass::Data(task), &connection.socket);
         }
         
 
 
-        let mut reconstruction_array: VecDeque<(Integer, Integer, Integer)> = vec![].into();
+        let mut reconstruction_array: Vec<(Integer, Integer, Integer)> = vec![];
 
         //recives the computations from spokes
         for connection in connections{
@@ -157,9 +143,8 @@ mod pi_calc{
             let responce: ComputeResult = ciborium::from_reader(&mut connection.socket).unwrap();
             println!("recived data");
 
-            let mut reformatted_responce: VecDeque<(Integer, Integer, Integer)> = responce.result.iter().map(|x| (Integer::from_str(x.0.as_str()).unwrap(),Integer::from_str(x.1.as_str()).unwrap(),Integer::from_str(x.2.as_str()).unwrap())).collect();
 
-            reconstruction_array.append(&mut reformatted_responce);
+            reconstruction_array.push(responce.result);
         }
 
         println!("recived all data finilizing computing");
@@ -168,22 +153,22 @@ mod pi_calc{
         while reconstruction_array.len() > 1{
             let length =reconstruction_array.len();
             for _ in 0..length/2{
-                let (pam, qam, ram) = reconstruction_array.pop_front().unwrap();
-                let (pmb, qmb, rmb) = reconstruction_array.pop_front().unwrap();
+                let (pam, qam, ram) = reconstruction_array.pop().unwrap();
+                let (pmb, qmb, rmb) = reconstruction_array.pop().unwrap();
                 let pab = &pam * pmb;
                 let qab = qam * &qmb;
                 let rab = qmb * ram + pam * rmb;
-                reconstruction_array.push_back((pab, qab, rab));
+                reconstruction_array.push((pab, qab, rab));
             }
         }
-        reconstruction_array.front().unwrap().clone()
+        reconstruction_array.pop().unwrap()
     }
 
     //runs the chudnovsky algorithem where n is the percision number
     pub fn chudnovsky(n: i128, connections: &mut Vec<Connection>) -> rug::Float{
         let (_p1n, q1n, r1n) = fast_bin_split(n, connections);
         println!("last step before victory");
-        (426880.0 * Float::with_val((n* 50) as u32, 10005).sqrt() * &q1n) / (13591409*q1n + r1n)
+        (426880.0 * Float::with_val((n* 100) as u32, 10005).sqrt() * &q1n) / (13591409*q1n + r1n)
     }
 }
 
@@ -258,7 +243,7 @@ fn main() {
     println!("starting the pi calculations");
 
 
-    let calculated_pi: Vec<char> = pi_calc::chudnovsky(10000000, &mut connections).to_string().chars().collect();
+    let calculated_pi: Vec<char> = pi_calc::chudnovsky(10_000_000, &mut connections).to_string().chars().collect();
 
     let elapsed_seconds = match now.elapsed() {
         Ok(value) => value.as_secs_f64(),

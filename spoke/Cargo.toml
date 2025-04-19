@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-rug = "1.27.0"
+rug = {version = "1.27.0", features = ["serde"]}
 derive_more = { version = "1", features = ["full"] }
 serde = { version = "1.0.209", features = ["derive"] }
 ciborium = "0.2.2"
