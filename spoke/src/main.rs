@@ -17,7 +17,6 @@ mod pi_calc{
     //an binay split algorithem
     pub fn bin_split(a: i128, b:i128) -> (rug::Integer,rug::Integer,rug::Integer){
         if b == a + 1{
-
            let pab = Integer::from(-(6*a - 5)*(2*a - 1)*(6*a - 1));
            let qab = Integer::from(10939058860032000 * a.pow(3));
            let rab = Integer::from(&pab * (545140134*a + 13591409));
@@ -109,7 +108,7 @@ fn computation_handeler(stream: &mut TcpStream) -> Result<(), Error>{
 }
 
 fn main() {
-    let system_info = SystemInfo{api_version: API_VERSION, cores: 4};
+    let system_info = SystemInfo{api_version: API_VERSION, cores: 16};
 
     loop {
         let mut stream = loop{

@@ -1,0 +1,122 @@
+:root{
+    background-color: black;
+    font-family: monospace;
+    font-size: 20px;
+    
+    --backcol: #0024007F; 
+    --frontcol: #22ff067F; 
+    --h_backcol: #000e007f; 
+    --h_frontcol: #0f79017f; 
+    --h_textcol: #138a04;
+    --backcol_b: #002400f3;
+    --textcol: #23ff06;
+    color: #23ff06;
+}
+
+body{
+    padding: 0px;
+}
+
+#buttons button{
+    width: 100%;
+    float: left;
+    padding: 3px;
+}
+
+
+#side_bar{
+    top: -3px;
+    margin: -13px;
+    float: left;
+    width: 17%;
+    position: fixed;
+    overflow: scroll;
+    border: 3px solid var(--frontcol);
+    background-color: var(--backcol);
+    padding: 10px;
+}
+
+#side_bar .button{
+    margin-top: 10px;
+    display: block;
+    height: 30px;
+    border: 3px solid var(--frontcol);
+    padding: 1px 6px;
+    color: var(--textcol);
+    background-color: var(--backcol_b);
+    text-decoration: none;
+}
+
+#side_bar .button:hover{
+    cursor: pointer;
+    border: 3px solid var(--h_frontcol);
+    padding: 1px 6px;
+    color: var(--h_textcol);
+    background-color: var(--h_backcol);
+}
+
+#table_of_content{
+    float: right;
+    width: 20%;
+    position: sticky;
+    top: 5vh;
+    max-height: 90vh;
+    overflow: scroll;
+    margin-right: 1%;
+}
+
+#table_of_content div{
+    background-color: var(--backcol);
+    border: 3px solid var(--frontcol);
+    border-radius: 5px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+#table_of_content div:first-child{
+    margin-top: 0px;
+    border-radius: 10px 10px 5px 5px;
+}
+
+#table_of_content div:last-child{
+    border-radius: 5px 5px 10px 10px;
+    margin-bottom: 0px;
+}
+
+#table_of_content div:nth-child(even){
+    background-color: var(--backcol_b);
+}
+
+#table_of_content div:hover{
+    background-color: var(--h_textcol);
+    cursor: alias;
+}
+
+#text{
+    border: 10px solid transparent;
+    padding: 15px;
+    font-family: monospace;
+    color: var(--textcol);
+    width: 50%;
+    height: 70%;
+    margin: auto;
+    background-color: var(--backcol_b);
+}
+
+#text h1{
+    font-size: 50px;
+    text-align: center;
+}
+
+#text img{
+    display: block;
+    margin: auto;
+    width: 50%;
+}
+
+#background{
+    position: fixed;
+    top: 0px;
+    left: 0px;
+    z-index: -1;
+}

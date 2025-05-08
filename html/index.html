@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>Pi calculator dashboard</title>
+
+    <link rel="stylesheet" href="/style.css">
+</head>
+<style>
+    #dashboard{
+        position: absolute;
+        background-color: rgba(0, 0, 0, 0.856);
+        height: 90%;
+        width: 80%;
+        border-radius: 10px;
+        left: 10%;
+        top: 5%;
+    }
+
+    #spokes{
+        border: var(--front-col);
+        background-color: gray;
+        overflow: scroll;
+        position: absolute;
+        width: 95%;
+        left: 2.5%;
+        height: 40%;
+    }
+
+    #spokes div{
+        background-color: white;
+    }
+
+    #spokes div:nth-child(even){
+        background-color: aqua;
+    }
+
+    #start_stop{
+        border: none;
+        border-radius: 10px;
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        height: 70px;
+        width: 150px;
+        font-size: large;
+    }
+    
+    #calculation_progress{
+        position: absolute;
+        bottom: 10px;
+        width: 90%;
+        left: 5%;
+    }
+
+    #spokes_container{
+        background-color: rgba(59, 59, 59, 0.575);
+        position: absolute;
+        width: 90%;
+        left: 5%;
+        border-radius: 10px;
+        padding: 10px;
+        margin-top: 20px;
+        top: 40%;
+        height: 50%;
+    }
+
+    .config_menu{
+        position: absolute;
+        background: none;
+        display:flex;
+        width: max-content;
+        padding: 0px;
+    }
+
+    .config{
+        background-color: rgba(59, 59, 59, 0.575);
+        margin: 5px;
+        padding: 10px;
+        border-radius: 10px;
+        width: max-content;
+    }
+
+    .config .input{
+        width: 100%;
+    }
+</style>
+<body>
+    <div id="dashboard">
+        <h1>pi calculator</h1>
+        <div class="config container">
+            <div class="config_menu">
+                <div class="config">
+                    <h2>digit target</h2>
+                    <input class="input" type="text" id="target" oninput="update_target()">
+                </div>
+                <div class="config">
+                    <h2>chunk size</h2>
+                    <input class="input" type="text" id="chunk_size" oninput="update_target()">
+                </div>
+                <div class="config">
+                    <h2>last 20 digets</h2>
+                    <h3 id="result">
+                        none
+                    </h3>                
+                </div>
+                <div class="config">
+                    <h2>time taken</h2>
+                    <h3 id="time">
+                        none
+                    </h3>                
+                </div>
+            </div>
+            <button id="start_stop" onclick="start_stop()" style="background-color: #23ff06;">START !</button>
+            <div id="spokes_container">
+                <h1>computes</h1>
+                <span id="spoke_count">spoke count : </span>
+                <div id="spokes">
+                </div>
+            </div>
+            
+            <progress id="calculation_progress" value="0" max="100"></progress>
+        </div>
+    </div>
+    <script>
+        
+        var spoke_count = document.getElementById("spoke_count");
+        var target = document.getElementById("target");
+        var start_stop_button = document.getElementById("start_stop");
+        var result = document.getElementById("result");
+        var time_taken = document.getElementById("time");
+
+
+        var started = false;
+        function start_stop(){
+            if(!started){
+                start_stop_button.innerText = "STOP!";
+                start_stop_button.style.backgroundColor = "#FF0606";
+                fetch(`http://localhost:8080/start`,{
+                    method: "POST",
+                })
+            }else{
+                start_stop_button.innerText = "START!";
+                start_stop_button.style.backgroundColor = "#23ff06";
+                
+            }
+            started = !started;
+        }
+
+        function update_target(){
+            fetch(`http://localhost:8080/update_target?new=${target.value}`,{
+                method: "POST",
+            })
+        }
+
+        async function get_update(){
+            fetch("http://localhost:8080/hub_status")
+            .then((data) => data.json())
+            .then((json) => {
+                let spokes_element = document.getElementById("spokes");
+                spokes_element.innerHTML = '';
+                spoke_count.innerText = "spoke count : " + json.spokes.length;
+                if(target.value != json.target && document.activeElement != target){
+                    target.value = json.target;
+                }
+                json.spokes.forEach(element => {
+                    let new_spoke = document.createElement("div");
+                    let spoke_info = document.createElement("h3");
+                    spoke_info.innerText = "spoke : " + element.id + "\t cores : " + element.cores;
+                    let temp_result = (json.last_20 ?? "not calculated");
+                    if(temp_result != result.innerText){
+                        result.innerText = temp_result;
+                    }
+
+                    let temp_time = (json.duration ?? "not started");
+                    if(temp_time != time_taken.innerText){
+                        time_taken.innerText = temp_time;
+                    }
+                    new_spoke.append(spoke_info)
+                    spokes_element.append(new_spoke);
+                });
+
+
+            })
+        }
+
+        setInterval(get_update, 1000);
+    </script>
+    <script src="../scripts/background/background.js"></script>
+</body>
+</html>
