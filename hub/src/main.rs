@@ -38,7 +38,7 @@ async fn start_calculation(signal_channel: web::Data<Sender<PiCalcSignal>>) -> a
 
 #[actix_web::main]
 async fn main()-> std::io::Result<()>{
-    let pi_calc_status = PiCalcUpdate{spokes: vec![], status: PiCalcStatus::Init, progres: 0, last_20: None, duration: None, target: 100_000_000, chunk_size: 1024};
+    let pi_calc_status = PiCalcUpdate{spokes: vec![], status: PiCalcStatus::Init, progres: 0, last_20: None, duration: None, target: 100_000_000, chunk_size: 100000};
     let pi_calc_status = Arc::new(Mutex::new(pi_calc_status));
 
     let runner_arc = Arc::clone(&pi_calc_status);

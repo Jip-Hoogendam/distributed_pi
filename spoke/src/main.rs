@@ -1,4 +1,6 @@
 
+use std::sync::mpsc::Receiver;
+use std::thread::Thread;
 use std::{sync::mpsc, thread};
 use std::net::TcpStream;
 use std::io::{Error, ErrorKind};
@@ -7,7 +9,7 @@ use rug::Integer;
 use serde::{Deserialize,Serialize};
 
 //for possible compatibility issues
-const API_VERSION: usize = 3;
+const API_VERSION: usize = 4;
 
 
 //pi calculation based on the wikipedia artivle on the chudnovsky algorithem
@@ -34,17 +36,14 @@ mod pi_calc{
     }
 }
 
-
-
 //used to send the tasks for the spokes
 #[derive(Serialize, Deserialize, Debug)]
 enum TaskPass {
-    Data(Vec<(i128, i128)>),
+    Range(i128, i128), //a range of points to calculate
+    Compute((Integer, Integer, Integer), (Integer, Integer, Integer)),
+    Result((Integer, Integer, Integer)), //finilazation chunk of data
 }
-#[derive(Serialize, Deserialize, Debug)]
-struct ComputeResult{
-    result: (Integer, Integer, Integer)
-}
+
 
 
 #[derive(Serialize)]
@@ -54,64 +53,37 @@ struct SystemInfo{
 }
 
 //compute handeler
-fn computation_handeler(stream: &mut TcpStream) -> Result<(), Error>{
-    let deserilized_value: TaskPass = ciborium::from_reader(&*stream).unwrap();
-    println!("got tasks : {:?}", deserilized_value);
-    let TaskPass::Data(result_value) = deserilized_value;
-    
-
-    //starts the threads on the given data
-    let mut threads = vec![];
-    let mut return_channels = vec![];
-
-
-    //spawns the threads to search the binay ranges given.
-    for bin_recon in result_value{
-        let (tx,rx) = mpsc::channel();
-        return_channels.push(rx);
-        threads.push(thread::spawn(move || {
-            let result = pi_calc::bin_split(bin_recon.0, bin_recon.1);
-            tx.send(result).unwrap();
-        }));
+fn computation_handeler(task: TaskPass, threads: &mut Vec<thread::JoinHandle<()>>, return_channels: &mut Vec<Receiver<TaskPass>>){
+    println!("got tasks : {:?}", task);
+    match task{
+        TaskPass::Compute((pam, qam, ram), (pmb, qmb, rmb)) => {
+            let (tx,rx) = mpsc::channel();
+            return_channels.push(rx);
+            threads.push(thread::spawn(move || {
+                let pab = &pam * pmb;
+                let qab = qam * &qmb;
+                let rab = qmb * ram + pam * rmb;
+                tx.send(TaskPass::Result((pab, qab, rab))).unwrap();
+            }));
+        },
+        TaskPass::Range(begin, end) => {
+            let (tx,rx) = mpsc::channel();
+            return_channels.push(rx);
+            threads.push(thread::spawn(move || {
+                let result = pi_calc::bin_split(begin, end);
+                tx.send(TaskPass::Result(result)).unwrap();
+            }));
+        },
+        TaskPass::Result(_) => panic!("cant compute on result")
     }
-    
-
-    for thread in threads{
-        thread.join().unwrap();
-    }
-
-    let mut results = vec![];
-
-    for channel in return_channels{
-        let (pab, qab, rab) = channel.recv().unwrap();
-        results.push((pab, qab, rab));
-    }
-
-    //continuasly rebuilds the threads given untill there is one left.
-    while results.len() > 1{
-        let length =results.len();
-        for _ in 0..length/2{
-            let (pam, qam, ram) = results.pop().unwrap();
-            let (pmb, qmb, rmb) = results.pop().unwrap();
-            let pab = &pam * pmb;
-            let qab = qam * &qmb;
-            let rab = qmb * ram + pam * rmb;
-            results.push((pab, qab, rab));
-        }
-    }
-
-
-    let _ = ciborium::into_writer(&ComputeResult{result: results.pop().unwrap()}, stream);
-    
-    println!("my job is done");
-    Ok(())
 }
 
 fn main() {
     let system_info = SystemInfo{api_version: API_VERSION, cores: 16};
-
+    let mut threads =vec![];
+    let mut return_channels = vec![];
     loop {
-        let mut stream = loop{
+        let stream = loop{
             match TcpStream::connect("127.0.0.1:13021"){
                 Ok(stream) => break stream,
                 Err(e) => {
@@ -130,8 +102,9 @@ fn main() {
             }
             
         };
-        println!("connected to hub");
 
+        println!("connected to hub");
+        
         match ciborium::into_writer(&system_info, &stream){
             Ok(value) => value,
             Err(_) =>{
@@ -140,16 +113,50 @@ fn main() {
                 continue;
             }
         };
-
-        loop{
-            match computation_handeler(&mut stream){
-                Ok(value) => value,
-                Err(_) =>{
-                    println!("seems like the connection messed up restting the connection");
-                    let _ =stream.shutdown(std::net::Shutdown::Both);
-                    break;
+        
+        stream.set_nonblocking(true).unwrap();
+        loop{   
+            //accept signals
+            let maybe_task =  ciborium::from_reader(&stream);
+            match maybe_task {
+                Ok(task) => {
+                    computation_handeler(task, &mut threads, &mut return_channels);
+                }
+                Err(e) => {
+                    match e{
+                        ciborium::de::Error::Io(e) => {
+                            match e.kind() {
+                                std::io::ErrorKind::WouldBlock => (),
+                                 _ => {
+                                    let _  = stream.shutdown(std::net::Shutdown::Both);
+                                    println!("scoket disconected");
+                                    break;
+                                 }
+                            }
+                        },
+                        error => {
+                            println!("{}", error);
+                            let _  = stream.shutdown(std::net::Shutdown::Both);
+                            println!("scoket disconected");
+                            break;
+                        }
+                    }
                 }
             }
+
+            return_channels.retain(|channel| {
+                match channel.try_recv() {
+                    Ok(value) => {
+                        //block until we can continue
+                        stream.set_nonblocking(false).unwrap();
+                        ciborium::into_writer(&value, &stream).unwrap(); // Handle errors as needed
+                        stream.set_nonblocking(true).unwrap();
+                        println!("returned data");
+                        false
+                    }
+                    Err(_) => true
+                }
+            });
         }
     }
 }
