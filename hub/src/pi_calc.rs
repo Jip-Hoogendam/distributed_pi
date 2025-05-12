@@ -2,17 +2,12 @@
 
 use core::f64;
 
-use ciborium::value;
 use rug::{Float, Integer, Rational};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::sync::mpsc::TryRecvError;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use std::{
-    i64,
-    io::{stdout, Write},
     net::{TcpListener, TcpStream},
-    thread::sleep,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -21,10 +16,8 @@ struct ComputeResult {
 }
 
 use crossbeam_channel::unbounded;
-use std::io::{self, Take};
 use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 
 use std::thread;
 
@@ -35,15 +28,17 @@ const API_VERSION: usize = 4;
 #[derive(Serialize, Deserialize, Debug)]
 enum TaskPass {
     Range(i128, i128), //a range of points to calculate
-    Compute((Integer, Integer, Integer), (Integer, Integer, Integer)),
-    Result((Integer, Integer, Integer)), //finilazation chunk of data
+    Compute((Integer, Integer, Integer), (Integer, Integer, Integer), (i128, i128)),
+    Result((Integer, Integer, Integer), (i128, i128)), //finilazation chunk of data
+    AWK,
 }
 
 struct Connection {
     socket: TcpStream,
     threads: u16,
-    id: usize,l
-    tasks: usize
+    id: usize,
+    tasks: usize,
+    sending: bool
 }
 
 #[derive(Deserialize)]
@@ -71,11 +66,6 @@ fn bin_split(a: i128, b: i128) -> (rug::Integer, rug::Integer, rug::Integer) {
     }
 }
 
-//used to store the result and the ranges that it must compute with.
-struct BinaryReconstruction {
-    input: (i128, i128),
-}
-
 fn fast_bin_split(
     n: i128,
     task_dispatch: &crossbeam_channel::Sender<TaskPass>,
@@ -93,60 +83,58 @@ fn fast_bin_split(
     }
     let chunks = iterations as usize / chunksize;
 
-    //splits the cases with the desired lengths.
-    let mut tasks: Vec<TaskPass> = vec![];
 
+    let mut dispatched_tasks = 0;
     for i in 0..chunks {
+        dispatched_tasks += 1;
         if i == 0 {
-            tasks.push(TaskPass::Range(
+            task_dispatch.send(TaskPass::Range(
                 (i * chunks) as i128 + 1,
                 ((i + 1) * chunks) as i128,
-            ));
+            )).unwrap();
         } else {
-            tasks.push(TaskPass::Range(
+            task_dispatch.send(TaskPass::Range(
                 (i * chunks) as i128,
                 ((i + 1) * chunks) as i128,
-            ));
+            )).unwrap();
         }
     }
 
-    let mut compute_constructor = None;
-    let mut dispatched_tasks = 0;
+    //dispatches the computation tasks to the connections
+    let mut compute_results: Vec<TaskPass> = vec![];
     loop {
-        if !task_dispatch.is_full() && tasks.len() > 1 {
-            let task = tasks.pop().unwrap();
-            task_dispatch.send(task).unwrap();
-            dispatched_tasks += 1;
-        }
-
         if !task_return.is_empty() {
-            println!("got something");
-            compute_constructor = match compute_constructor {
-                None => Some(task_return.recv().unwrap()),
-                Some(value) => {
-                    let a = match value {
-                        TaskPass::Result(value) => value,
-                        _ => panic!("unkown retrurn"),
-                    };
-                    let b = match task_return.recv().unwrap() {
-                        TaskPass::Result(value) => value,
-                        _ => panic!("unkown retrurn"),
-                    };
-                    tasks.push(TaskPass::Compute(a, b));
-                    None
-                }
-            };
-            dispatched_tasks -= 1;
-        }
+            if let TaskPass::Result(recived,(range_begin, range_end)) = task_return.recv().unwrap() {
+                    if let Some(pos) = &compute_results.iter().position(|x| match x {
+                        TaskPass::Result(compare, (cmp_begin, cmp_end)) => {
+                            if range_end == *cmp_begin{
+                                let _ = task_dispatch.send(TaskPass::Compute(recived.clone(), compare.clone(), (range_begin, *cmp_end)));
+                                return true;
+                            }else if *cmp_end == range_begin{
+                                let _ = task_dispatch.send(TaskPass::Compute(compare.clone(), recived.clone(), (*cmp_begin, range_end)));
+                                return true;
+                            }
+                            false
+                        },
+                        _ => false
+                    }){
+                        compute_results.swap_remove(*pos);
+                    }else{
+                        compute_results.push(TaskPass::Result(recived,(range_begin, range_end)));
+                        dispatched_tasks -= 1;
+                    }
+            }
+    }
         if dispatched_tasks <= 0 {
             break;
         }
+
     }
 
     println!("done!");
 
-    match compute_constructor.expect("expected compute constructor to be something") {
-        TaskPass::Result(value) => value,
+    match &compute_results[0] {
+        TaskPass::Result(value,_) => value.clone(),
         _ => panic!("incrorrect value in compute constructor"),
     }
 }
@@ -221,28 +209,39 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
     //waits for connections
     loop {
 
-
         //dispatches tasks to workers
         if !connection_rx.is_empty() && !connections.is_empty(){
             for connection in &mut connections{
-                if connection.tasks != connection.threads as usize{
-                    connection.tasks += 1;
+                if connection.tasks != connection.threads as usize && !connection.sending{
+                    println!("send data :3 {}", connection.sending);
                     let task: TaskPass = connection_rx.try_recv().unwrap();
+                    connection.tasks += 1;
+                    let _ = connection.socket.set_nonblocking(false);
                     ciborium::into_writer(&task, &connection.socket).unwrap();
+                    let _ = connection.socket.set_nonblocking(true);
+                    connection.sending = true;
                     break;
                 }
             }
         }
 
-
+        //checks if something is recived from a socket
         for connection in &mut connections{
-            if connection.tasks > 0{
-                let mut buf = [10];
-                if connection.socket.peek(&mut buf).unwrap() > 1{
-                    let result = ciborium::from_reader(&connection.socket).unwrap();
-                    let _ = connection_tx.send(result);
-                    connection.tasks -= 1;
-                }
+            let mut buf = [1;100];
+            if connection.tasks > 0 && connection.socket.peek(&mut buf).unwrap_or(0) > 90 {
+                if let Ok(result) = ciborium::from_reader(&connection.socket) {
+                    match result{
+                    TaskPass::AWK => {connection.sending = false;
+                        println!("got awk");
+                    }
+
+                    _ => {
+                            let _ = connection_tx.send(result);
+                            connection.tasks -= 1;
+                        }
+                    }
+                    
+                }                
             }
         }
 
@@ -319,11 +318,13 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
         }
 
         println!("spoke connected");
+        let _ = socket.set_nonblocking(true);
         connections.push(Connection {
             socket,
             threads: system_info.cores as u16,
             id: spoke_id_counter,
-            tasks: 0
+            tasks: 0,
+            sending:false
         });
         status_update_var.lock().unwrap().spokes.push(SpokeInfo {
             id: spoke_id_counter,

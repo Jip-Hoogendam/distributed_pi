@@ -40,10 +40,10 @@ mod pi_calc{
 #[derive(Serialize, Deserialize, Debug)]
 enum TaskPass {
     Range(i128, i128), //a range of points to calculate
-    Compute((Integer, Integer, Integer), (Integer, Integer, Integer)),
-    Result((Integer, Integer, Integer)), //finilazation chunk of data
+    Compute((Integer, Integer, Integer), (Integer, Integer, Integer), (i128, i128)),
+    Result((Integer, Integer, Integer), (i128, i128)), //finilazation chunk of data
+    AWK,
 }
-
 
 
 #[derive(Serialize)]
@@ -54,27 +54,29 @@ struct SystemInfo{
 
 //compute handeler
 fn computation_handeler(task: TaskPass, threads: &mut Vec<thread::JoinHandle<()>>, return_channels: &mut Vec<Receiver<TaskPass>>){
-    println!("got tasks : {:?}", task);
     match task{
-        TaskPass::Compute((pam, qam, ram), (pmb, qmb, rmb)) => {
+        TaskPass::Compute((pam, qam, ram), (pmb, qmb, rmb), range) => {
             let (tx,rx) = mpsc::channel();
             return_channels.push(rx);
             threads.push(thread::spawn(move || {
+                println!("got task with range: {:?}", range);
                 let pab = &pam * pmb;
                 let qab = qam * &qmb;
                 let rab = qmb * ram + pam * rmb;
-                tx.send(TaskPass::Result((pab, qab, rab))).unwrap();
+                tx.send(TaskPass::Result((pab, qab, rab), range)).unwrap();
             }));
         },
         TaskPass::Range(begin, end) => {
             let (tx,rx) = mpsc::channel();
             return_channels.push(rx);
             threads.push(thread::spawn(move || {
+                println!("got task with range: {:?}", (begin, end));
                 let result = pi_calc::bin_split(begin, end);
-                tx.send(TaskPass::Result(result)).unwrap();
+                tx.send(TaskPass::Result(result, (begin, end))).unwrap();
             }));
         },
-        TaskPass::Result(_) => panic!("cant compute on result")
+        TaskPass::Result(_,_) => panic!("hub shuld never send result"),
+        TaskPass::AWK => (),
     }
 }
 
@@ -113,32 +115,35 @@ fn main() {
                 continue;
             }
         };
-        
         stream.set_nonblocking(true).unwrap();
-        loop{   
+
+        let mut task_count =0;
+        loop{
             //accept signals
-            let maybe_task =  ciborium::from_reader(&stream);
-            match maybe_task {
-                Ok(task) => {
-                    computation_handeler(task, &mut threads, &mut return_channels);
-                }
-                Err(e) => {
-                    match e{
-                        ciborium::de::Error::Io(e) => {
-                            match e.kind() {
-                                std::io::ErrorKind::WouldBlock => (),
-                                 _ => {
-                                    let _  = stream.shutdown(std::net::Shutdown::Both);
-                                    println!("scoket disconected");
-                                    break;
-                                 }
+            let mut buf = [1;100];
+            if stream.peek(&mut buf).unwrap_or(0) > 90{
+            
+                let maybe_task =  ciborium::from_reader(&stream);
+                match maybe_task {
+                    Ok(task) => {
+                        task_count += 1;
+                        computation_handeler(task, &mut threads, &mut return_channels);
+                        let _ = ciborium::into_writer(&TaskPass::AWK, &stream);
+                    }
+                    Err(e) => {
+                        match e{
+                            ciborium::de::Error::Io(e) => {
+                                match e.kind() {
+                                    std::io::ErrorKind::WouldBlock => (),
+                                    _ => {
+                                        break;
+                                    }
+                                }
+                            },
+                            error => {
+                                println!("recive error : {}", error);
+                                break;
                             }
-                        },
-                        error => {
-                            println!("{}", error);
-                            let _  = stream.shutdown(std::net::Shutdown::Both);
-                            println!("scoket disconected");
-                            break;
                         }
                     }
                 }
@@ -151,12 +156,14 @@ fn main() {
                         stream.set_nonblocking(false).unwrap();
                         ciborium::into_writer(&value, &stream).unwrap(); // Handle errors as needed
                         stream.set_nonblocking(true).unwrap();
-                        println!("returned data");
+                        task_count -= 1;
                         false
                     }
                     Err(_) => true
                 }
             });
         }
+        let _  = stream.shutdown(std::net::Shutdown::Both);
+        println!("scoket disconected");
     }
 }
