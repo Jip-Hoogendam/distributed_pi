@@ -128,7 +128,7 @@ fn main() {
                     Ok(task) => {
                         task_count += 1;
                         computation_handeler(task, &mut threads, &mut return_channels);
-                        let _ = ciborium::into_writer(&TaskPass::AWK, &stream);
+                        ciborium::into_writer(&TaskPass::AWK, &stream).unwrap();
                     }
                     Err(e) => {
                         match e{

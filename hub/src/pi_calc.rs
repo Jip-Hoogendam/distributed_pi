@@ -213,7 +213,7 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
         if !connection_rx.is_empty() && !connections.is_empty(){
             for connection in &mut connections{
                 if connection.tasks != connection.threads as usize && !connection.sending{
-                    println!("send data :3 {}", connection.sending);
+                    println!("send data :3");
                     let task: TaskPass = connection_rx.try_recv().unwrap();
                     connection.tasks += 1;
                     let _ = connection.socket.set_nonblocking(false);
@@ -228,13 +228,13 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
         //checks if something is recived from a socket
         for connection in &mut connections{
             let mut buf = [1;100];
-            if connection.tasks > 0 && connection.socket.peek(&mut buf).unwrap_or(0) > 90 {
+            if connection.socket.peek(&mut buf).unwrap_or(0) > 90 {
                 if let Ok(result) = ciborium::from_reader(&connection.socket) {
                     match result{
-                    TaskPass::AWK => {connection.sending = false;
+                    TaskPass::AWK => {
+                        connection.sending = false;
                         println!("got awk");
                     }
-
                     _ => {
                             let _ = connection_tx.send(result);
                             connection.tasks -= 1;
