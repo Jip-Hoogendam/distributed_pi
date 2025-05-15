@@ -121,21 +121,25 @@ fn main() {
         loop{
             //accept signals
             let mut buf = [1;100];
-            if stream.peek(&mut buf).unwrap_or(0) > 90{
+            if stream.peek(&mut buf).unwrap_or(0) > 10{
             
                 let maybe_task =  ciborium::from_reader(&stream);
+                println!("got something");
                 match maybe_task {
                     Ok(task) => {
                         task_count += 1;
                         computation_handeler(task, &mut threads, &mut return_channels);
+                        stream.set_nonblocking(false).unwrap();
                         ciborium::into_writer(&TaskPass::AWK, &stream).unwrap();
+                        stream.set_nonblocking(true).unwrap();
                     }
                     Err(e) => {
                         match e{
                             ciborium::de::Error::Io(e) => {
                                 match e.kind() {
                                     std::io::ErrorKind::WouldBlock => (),
-                                    _ => {
+                                   error => {
+                                        println!("recive error : {}", error);
                                         break;
                                     }
                                 }

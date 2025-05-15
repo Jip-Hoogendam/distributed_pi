@@ -228,7 +228,7 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
         //checks if something is recived from a socket
         for connection in &mut connections{
             let mut buf = [1;100];
-            if connection.socket.peek(&mut buf).unwrap_or(0) > 90 {
+            if connection.socket.peek(&mut buf).unwrap_or(0) > 10 {
                 if let Ok(result) = ciborium::from_reader(&connection.socket) {
                     match result{
                     TaskPass::AWK => {
