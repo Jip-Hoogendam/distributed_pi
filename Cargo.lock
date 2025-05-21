@@ -551,7 +551,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "distributed_pi_project_hub"
+name = "distributed_pi_project"
 version = "0.3.0"
 dependencies = [
  "actix-cors",

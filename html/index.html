@@ -37,7 +37,7 @@
         background-color: aqua;
     }
 
-    #start_stop{
+    #start_stop_button{
         border: none;
         border-radius: 10px;
         position: absolute;
@@ -98,7 +98,7 @@
                 </div>
                 <div class="config">
                     <h2>chunk size</h2>
-                    <input class="input" type="text" id="chunk_size" oninput="update_target()">
+                    <input class="input" type="text" id="chunk_size" oninput="update_chunksize()">
                 </div>
                 <div class="config">
                     <h2>last 20 digets</h2>
@@ -113,7 +113,7 @@
                     </h3>                
                 </div>
             </div>
-            <button id="start_stop" onclick="start_stop()" style="background-color: #23ff06;">START !</button>
+            <button id="start_stop_button" onclick="start_stop()" style="background-color: #23ff06;">START !</button>
             <div id="spokes_container">
                 <h1>computes</h1>
                 <span id="spoke_count">spoke count : </span>
@@ -126,13 +126,7 @@
     </div>
     <script>
         
-        var spoke_count = document.getElementById("spoke_count");
-        var target = document.getElementById("target");
-        var start_stop_button = document.getElementById("start_stop");
-        var result = document.getElementById("result");
-        var time_taken = document.getElementById("time");
-
-
+        
         var started = false;
         function start_stop(){
             if(!started){
@@ -155,6 +149,12 @@
             })
         }
 
+        function update_chunksize(){
+            fetch(`http://localhost:8080/update_chunk_size?new=${chunk_size.value}`,{
+                method: "POST",
+            })
+        }
+
         async function get_update(){
             fetch("http://localhost:8080/hub_status")
             .then((data) => data.json())
@@ -164,6 +164,10 @@
                 spoke_count.innerText = "spoke count : " + json.spokes.length;
                 if(target.value != json.target && document.activeElement != target){
                     target.value = json.target;
+                }
+
+                if(chunk_size.value != json.chunk_size && document.activeElement != chunk_size){
+                    chunk_size.value = json.chunk_size;
                 }
                 json.spokes.forEach(element => {
                     let new_spoke = document.createElement("div");
@@ -175,8 +179,8 @@
                     }
 
                     let temp_time = (json.duration ?? "not started");
-                    if(temp_time != time_taken.innerText){
-                        time_taken.innerText = temp_time;
+                    if(temp_time != time.innerText){
+                        time.innerText = temp_time;
                     }
                     new_spoke.append(spoke_info)
                     spokes_element.append(new_spoke);

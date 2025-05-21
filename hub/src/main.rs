@@ -30,6 +30,12 @@ async fn update_target(info: web::Query<TargetQuery>,pi_status: web::Data<Arc<Mu
     Ok(HttpResponse::Ok())
 }
 
+#[post("update_chunk_size")]
+async fn update_chunk_size(info: web::Query<TargetQuery>,pi_status: web::Data<Arc<Mutex<PiCalcUpdate>>>) -> actix_web::Result<impl Responder>{
+    pi_status.lock().unwrap().chunk_size = info.new;
+    Ok(HttpResponse::Ok())
+}
+
 #[post("start")]
 async fn start_calculation(signal_channel: web::Data<Sender<PiCalcSignal>>) -> actix_web::Result<impl Responder> {
     let _ = signal_channel.send(PiCalcSignal::Start);
@@ -51,7 +57,7 @@ async fn main()-> std::io::Result<()>{
 
     HttpServer::new(move ||{
         let cors = Cors::default()
-            .allowed_origin("http://127.0.0.1:5500");
+            .allowed_origin("http://localhost");
         App::new()
             .wrap(cors)
             .app_data(signal_tx.clone())
@@ -60,7 +66,8 @@ async fn main()-> std::io::Result<()>{
             .service(hub_status)
             .service(update_target)
             .service(start_calculation)
-    }).bind(("127.0.0.1", 8080))?
+            .service(update_chunk_size)
+    }).bind(("0.0.0.0", 8080))?
     .run()
     .await
 }

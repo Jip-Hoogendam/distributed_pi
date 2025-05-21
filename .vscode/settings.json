@@ -1,7 +1,7 @@
 {
     "rust-analyzer.linkedProjects": [
-      "spoke/Cargo.toml",
-      "hub/Cargo.toml",
+      "./hub/Cargo.toml",
+      "./spoke/Cargo.toml"
     ]
   }
   

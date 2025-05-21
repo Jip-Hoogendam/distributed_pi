@@ -1,9 +1,10 @@
 
 use std::sync::mpsc::Receiver;
-use std::thread::Thread;
+use std::time::Duration;
 use std::{sync::mpsc, thread};
 use std::net::TcpStream;
-use std::io::{Error, ErrorKind};
+use std::io::ErrorKind;
+use std::env;
 
 use rug::Integer;
 use serde::{Deserialize,Serialize};
@@ -81,12 +82,16 @@ fn computation_handeler(task: TaskPass, threads: &mut Vec<thread::JoinHandle<()>
 }
 
 fn main() {
-    let system_info = SystemInfo{api_version: API_VERSION, cores: 16};
+    let args: Vec<(String,String)> = env::vars().collect();
+    let hub_url = args.iter().find(|(key, _)| key == "HUB_URL").expect("HUB_URL is not set");
+    let threads: usize = args.iter().find(|(key, _)| key == "THREADS").expect("THREADS is not set").1.parse().expect("THREADS is not an interger");
+    let system_info = SystemInfo{api_version: API_VERSION, cores: threads};
     let mut threads =vec![];
     let mut return_channels = vec![];
     loop {
         let stream = loop{
-            match TcpStream::connect("127.0.0.1:13021"){
+            println!("attempting a connection at : {}",hub_url.1.clone());
+            match TcpStream::connect(hub_url.1.clone()){
                 Ok(stream) => break stream,
                 Err(e) => {
                     match e.kind(){
@@ -115,23 +120,23 @@ fn main() {
                 continue;
             }
         };
-        stream.set_nonblocking(true).unwrap();
 
         let mut task_count =0;
         loop{
             //accept signals
             let mut buf = [1;100];
-            if stream.peek(&mut buf).unwrap_or(0) > 10{
+            stream.set_nonblocking(true).unwrap();
+            let recive_length = stream.peek(&mut buf).unwrap_or(0);
+            stream.set_nonblocking(false).unwrap();
+
+            if recive_length > 2{
             
                 let maybe_task =  ciborium::from_reader(&stream);
-                println!("got something");
                 match maybe_task {
                     Ok(task) => {
                         task_count += 1;
                         computation_handeler(task, &mut threads, &mut return_channels);
-                        stream.set_nonblocking(false).unwrap();
                         ciborium::into_writer(&TaskPass::AWK, &stream).unwrap();
-                        stream.set_nonblocking(true).unwrap();
                     }
                     Err(e) => {
                         match e{
@@ -157,15 +162,15 @@ fn main() {
                 match channel.try_recv() {
                     Ok(value) => {
                         //block until we can continue
-                        stream.set_nonblocking(false).unwrap();
+                        if let TaskPass::Result(_, ( a , b)) = value { println!("retrunting a range of {} to {}", a , b) }
                         ciborium::into_writer(&value, &stream).unwrap(); // Handle errors as needed
-                        stream.set_nonblocking(true).unwrap();
                         task_count -= 1;
                         false
                     }
                     Err(_) => true
                 }
             });
+            thread::sleep(Duration::from_millis(10));
         }
         let _  = stream.shutdown(std::net::Shutdown::Both);
         println!("scoket disconected");

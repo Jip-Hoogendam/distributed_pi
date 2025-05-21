@@ -1,14 +1,14 @@
 //module for the calculation of pi
 
 use core::f64;
+use std::io::Empty;
 
+use actix_web::cookie::time;
 use rug::{Float, Integer, Rational};
 use serde::{Deserialize, Serialize};
+use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::TryRecvError;
-use std::time::SystemTime;
-use std::{
-    net::{TcpListener, TcpStream},
-};
+use std::time::{Duration, SystemTime};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ComputeResult {
@@ -19,7 +19,7 @@ use crossbeam_channel::unbounded;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
-use std::thread;
+use std::thread::{self, Thread};
 
 //for possible compatibility issues
 const API_VERSION: usize = 4;
@@ -28,17 +28,21 @@ const API_VERSION: usize = 4;
 #[derive(Serialize, Deserialize, Debug)]
 enum TaskPass {
     Range(i128, i128), //a range of points to calculate
-    Compute((Integer, Integer, Integer), (Integer, Integer, Integer), (i128, i128)),
+    Compute(
+        (Integer, Integer, Integer),
+        (Integer, Integer, Integer),
+        (i128, i128),
+    ),
     Result((Integer, Integer, Integer), (i128, i128)), //finilazation chunk of data
     AWK,
 }
 
 struct Connection {
-    socket: TcpStream,
+    handeler: thread::JoinHandle<()>,
     threads: u16,
     id: usize,
     tasks: usize,
-    sending: bool
+    sending: bool,
 }
 
 #[derive(Deserialize)]
@@ -83,20 +87,23 @@ fn fast_bin_split(
     }
     let chunks = iterations as usize / chunksize;
 
-
     let mut dispatched_tasks = 0;
     for i in 0..chunks {
         dispatched_tasks += 1;
         if i == 0 {
-            task_dispatch.send(TaskPass::Range(
-                (i * chunks) as i128 + 1,
-                ((i + 1) * chunks) as i128,
-            )).unwrap();
+            task_dispatch
+                .send(TaskPass::Range(
+                    (i * chunksize) as i128 + 1,
+                    ((i + 1) * chunksize) as i128,
+                ))
+                .unwrap();
         } else {
-            task_dispatch.send(TaskPass::Range(
-                (i * chunks) as i128,
-                ((i + 1) * chunks) as i128,
-            )).unwrap();
+            task_dispatch
+                .send(TaskPass::Range(
+                    (i * chunksize) as i128,
+                    ((i + 1) * chunksize) as i128,
+                ))
+                .unwrap();
         }
     }
 
@@ -104,37 +111,48 @@ fn fast_bin_split(
     let mut compute_results: Vec<TaskPass> = vec![];
     loop {
         if !task_return.is_empty() {
-            if let TaskPass::Result(recived,(range_begin, range_end)) = task_return.recv().unwrap() {
-                    if let Some(pos) = &compute_results.iter().position(|x| match x {
-                        TaskPass::Result(compare, (cmp_begin, cmp_end)) => {
-                            if range_end == *cmp_begin{
-                                let _ = task_dispatch.send(TaskPass::Compute(recived.clone(), compare.clone(), (range_begin, *cmp_end)));
-                                return true;
-                            }else if *cmp_end == range_begin{
-                                let _ = task_dispatch.send(TaskPass::Compute(compare.clone(), recived.clone(), (*cmp_begin, range_end)));
-                                return true;
-                            }
-                            false
-                        },
-                        _ => false
-                    }){
-                        compute_results.swap_remove(*pos);
-                    }else{
-                        compute_results.push(TaskPass::Result(recived,(range_begin, range_end)));
-                        dispatched_tasks -= 1;
+            if let TaskPass::Result(recived, (range_begin, range_end)) = task_return.recv().unwrap()
+            {
+                println!("got result of {} to {}", range_begin, range_end);
+                dispatched_tasks -= 1;
+                if let Some(pos) = &compute_results.iter().position(|x| match x {
+                    TaskPass::Result(compare, (cmp_begin, cmp_end)) => {
+                        if range_end == *cmp_begin {
+                            let _ = task_dispatch.send(TaskPass::Compute(
+                                recived.clone(),
+                                compare.clone(),
+                                (range_begin, *cmp_end),
+                            ));
+                            dispatched_tasks += 1;
+                            return true;
+                        } else if *cmp_end == range_begin {
+                            let _ = task_dispatch.send(TaskPass::Compute(
+                                compare.clone(),
+                                recived.clone(),
+                                (*cmp_begin, range_end),
+                            ));
+                            dispatched_tasks += 1;
+                            return true;
+                        }
+                        false
                     }
+                    _ => false,
+                }) {
+                    compute_results.swap_remove(*pos);
+                } else {
+                    compute_results.push(TaskPass::Result(recived, (range_begin, range_end)));
+                }
+            }else{
+                println!("unkown error ?");
             }
-    }
+        }
         if dispatched_tasks <= 0 {
             break;
         }
-
     }
 
-    println!("done!");
-
     match &compute_results[0] {
-        TaskPass::Result(value,_) => value.clone(),
+        TaskPass::Result(value, _) => value.clone(),
         _ => panic!("incrorrect value in compute constructor"),
     }
 }
@@ -147,15 +165,17 @@ fn chudnovsky(
     chunk_size: usize,
 ) -> rug::Float {
     let (_p1n, q1n, r1n) = fast_bin_split(n / 14, task_dispatch, task_return, chunk_size);
+    println!("finelizing!");
     let bits = (n as f64 * f64::consts::LOG2_10 + 16.0).ceil() as u32;
 
-    let c = Float::with_val(bits, 426880);
+    let c = 426880;
     let sqrt05 = Float::with_val(bits, 10005).sqrt();
 
     // build the rational (13591409·q + r) / q
     let denom_rat = Rational::from((13591409 * q1n.clone() + r1n, q1n));
     let denom_f = Float::with_val(bits, denom_rat);
 
+    println!("almost done !");
     c * sqrt05 / denom_f
 }
 
@@ -192,7 +212,7 @@ pub enum PiCalcSignal {
 
 //function for running the hub connector
 pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<PiCalcSignal>) {
-    let listener = TcpListener::bind("127.0.0.1:13021").unwrap();
+    let listener = TcpListener::bind("0.0.0.0:13021").unwrap();
 
     //used to store the connections
     let mut connections: Vec<Connection> = vec![];
@@ -208,42 +228,7 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
 
     //waits for connections
     loop {
-
-        //dispatches tasks to workers
-        if !connection_rx.is_empty() && !connections.is_empty(){
-            for connection in &mut connections{
-                if connection.tasks != connection.threads as usize && !connection.sending{
-                    println!("send data :3");
-                    let task: TaskPass = connection_rx.try_recv().unwrap();
-                    connection.tasks += 1;
-                    let _ = connection.socket.set_nonblocking(false);
-                    ciborium::into_writer(&task, &connection.socket).unwrap();
-                    let _ = connection.socket.set_nonblocking(true);
-                    connection.sending = true;
-                    break;
-                }
-            }
-        }
-
-        //checks if something is recived from a socket
-        for connection in &mut connections{
-            let mut buf = [1;100];
-            if connection.socket.peek(&mut buf).unwrap_or(0) > 10 {
-                if let Ok(result) = ciborium::from_reader(&connection.socket) {
-                    match result{
-                    TaskPass::AWK => {
-                        connection.sending = false;
-                        println!("got awk");
-                    }
-                    _ => {
-                            let _ = connection_tx.send(result);
-                            connection.tasks -= 1;
-                        }
-                    }
-                    
-                }                
-            }
-        }
+        thread::sleep(Duration::from_millis(10));
 
         let some_key = match singal.try_recv() {
             Ok(key) => Some(key),
@@ -271,8 +256,7 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
                 runner_update.lock().unwrap().status = PiCalcStatus::Running;
                 let now = SystemTime::now();
                 let target = runner_update.lock().unwrap().target;
-                let calculated_pi =
-                    chudnovsky(target, &task_tx, &task_rx, chunk_size).to_string();
+                let calculated_pi = chudnovsky(target, &task_tx, &task_rx, chunk_size).to_string();
                 let duration = now.elapsed().expect("unexpected time error");
                 runner_update.lock().unwrap().status = PiCalcStatus::Stopped;
 
@@ -286,8 +270,7 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
                 calculated_pi.next_back();
                 calculated_pi.next_back();
 
-                runner_update.lock().unwrap().last_20 =
-                    Some(calculated_pi.as_str().to_string());
+                runner_update.lock().unwrap().last_20 = Some(calculated_pi.as_str().to_string());
                 runner_update.lock().unwrap().duration = Some(duration.as_secs_f64());
             }));
         }
@@ -318,13 +301,63 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
         }
 
         println!("spoke connected");
-        let _ = socket.set_nonblocking(true);
+
+        let thread_count = system_info.cores;
+
+        let connection_rx = connection_rx.clone();
+        let connection_tx = connection_tx.clone();
+
+        let handeler = thread::spawn(move || {
+            let mut sending = false;
+            let mut tasks = 0;
+            loop{
+                //dispatches tasks to workers
+                if !connection_rx.is_empty(){
+                    let mut buf = [1; 60000];
+                    socket.set_nonblocking(true).unwrap();
+                    let recive_length = socket.peek(&mut buf).unwrap_or(0);
+                    socket.set_nonblocking(false).unwrap();
+                    if tasks != thread_count as usize && !sending && recive_length < 60000 {
+                        let task: TaskPass = match connection_rx.try_recv() {
+                            Ok(value) => value,
+                            Err(crossbeam_channel::TryRecvError::Empty) => continue,
+                            Err(_) =>panic!("channel unexpectedly disconnected"),
+                        };
+                        tasks += 1;
+
+                        ciborium::into_writer(&task, &socket).unwrap();
+                        sending = true;
+                    }
+                }
+
+                //checks if something is recived from a socket
+                let mut buf = [1; 100];
+                socket.set_nonblocking(true).unwrap();
+                let recive_length = socket.peek(&mut buf).unwrap_or(0);
+                socket.set_nonblocking(false).unwrap();
+                if recive_length > 1 {
+                    if let Ok(result) = ciborium::from_reader(&socket) {
+                        match result {
+                            TaskPass::AWK => {
+                                sending = false;
+                            }
+                            _ => {
+                                let _ = connection_tx.send(result);
+                                tasks -= 1;
+                            }
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+
         connections.push(Connection {
-            socket,
+            handeler,
             threads: system_info.cores as u16,
             id: spoke_id_counter,
             tasks: 0,
-            sending:false
+            sending: false,
         });
         status_update_var.lock().unwrap().spokes.push(SpokeInfo {
             id: spoke_id_counter,

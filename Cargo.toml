@@ -1,5 +1,5 @@
 [package]
-name = "distributed_pi_project_hub"
+name = "distributed_pi_project"
 version = "0.3.0"
 edition = "2021"
 
@@ -13,3 +13,11 @@ actix-web = "4.10.2"
 actix-cors = "0.7.1"
 crossbeam = "0.8.4"
 crossbeam-channel = "0.5.15"
+
+[[bin]]
+name = "hub"
+path = "hub/src/main.rs"
+
+[[bin]]
+name = "spoke"
+path = "spoke/src/main.rs"

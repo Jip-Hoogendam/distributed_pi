@@ -1,0 +1,16 @@
+FROM debian:bookworm-slim
+
+WORKDIR /usr/bin/
+
+RUN apt-get update && apt-get install -y \
+    libmpc-dev \
+    libgmp-dev \
+    libmpfr-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY target/release/distributed_pi_project_hub ./hub
+
+EXPOSE 8080
+EXPOSE 13021
+
+CMD ["./hub"]
