@@ -8,5 +8,4 @@ cargo build --release
 
 
 # run the dockercontainer
-docker-compose down
 docker-compose up --build

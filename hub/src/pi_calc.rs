@@ -1,6 +1,8 @@
 //module for the calculation of pi
 
 use core::f64;
+use std::fs::File;
+use std::io::Write;
 use rug::{Float, Integer, Rational};
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
@@ -74,7 +76,7 @@ fn fast_bin_split(
             break;
         }
     }
-    let chunks = iterations as usize / chunksize;
+    let chunks = iterations as usize / chunksize ;
 
     let mut dispatched_tasks = 0;
     for i in 0..chunks {
@@ -100,8 +102,8 @@ fn fast_bin_split(
         if !task_return.is_empty() {
             if let TaskPass::Result(recived, (range_begin, range_end)) = task_return.recv().unwrap()
             {
-                println!("got result of {} to {}", range_begin, range_end);
                 dispatched_tasks -= 1;
+                println!("got result of {} to {} dispatched tasks {}", range_begin, range_end, dispatched_tasks);
                 if let Some(pos) = &compute_results.iter().position(|x| match x {
                     TaskPass::Result(compare, (cmp_begin, cmp_end)) => {
                         if *cmp_end == range_begin {
@@ -120,12 +122,40 @@ fn fast_bin_split(
                     compute_results.swap_remove(*pos);
                 } else {
                     compute_results.push(TaskPass::Result(recived, (range_begin, range_end)));
+                    if compute_results.len() >= 2{
+                        'outer: for i in 0..compute_results.len() {
+                            if let TaskPass::Result(left_data, (left_start, left_end)) = &compute_results[i] {
+                                for j in 0..compute_results.len() {
+                                    if i == j {
+                                        continue;
+                                    }
+                                    if let TaskPass::Result(right_data, (right_start, right_end)) = &compute_results[j] {
+                                        if *left_end == *right_start {
+                                            // Found a matching pair, dispatch Compute
+                                            let _ = task_dispatch.send(TaskPass::Compute(
+                                                left_data.clone(),
+                                                right_data.clone(),
+                                                (*left_start, *right_end),
+                                            ));
+                                            dispatched_tasks += 1;
+
+                                            // Remove the used entries (ensure i > j so swap_remove is safe)
+                                            let (first, second) = if i > j { (i, j) } else { (j, i) };
+                                            compute_results.swap_remove(first);
+                                            compute_results.swap_remove(second);
+                                            break 'outer;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }else{
                 println!("unkown error ?");
             }
         }
-        if dispatched_tasks <= 0 {
+        if dispatched_tasks <= 0{
             break;
         }
     }
@@ -143,18 +173,15 @@ fn chudnovsky(
     task_return: &crossbeam_channel::Receiver<TaskPass>,
     chunk_size: usize,
 ) -> rug::Float {
-    let (_p1n, q1n, r1n) = fast_bin_split(n / 14, task_dispatch, task_return, chunk_size);
-    println!("finelizing!");
+    let (_p1n, q1n,mut r1n) = fast_bin_split(n/10, task_dispatch, task_return, chunk_size);
+
     let bits = (n as f64 * f64::consts::LOG2_10 + 16.0).ceil() as u32;
 
-    let c      = Float::with_val(bits, 426880);
+    let c      = 426880;
     let sqrt05 = Float::with_val(bits, 10005).sqrt();
+    r1n += 13591409 * &q1n;
 
-    // build the rational (13591409·q + r) / q
-    let denom_rat = Rational::from((13591409 * q1n.clone() + r1n, q1n));
-    let denom_f   = Float::with_val(bits, denom_rat);
-    println!("last step!");
-    c * sqrt05 / denom_f
+    c * sqrt05 / unsafe { Rational::from_canonical(r1n, q1n) }
 }
 
 #[derive(Serialize, Clone)]
