@@ -59,6 +59,16 @@ services:
     networks:
       - compute_network
 
+  spoke_5:
+    build:
+      context: ./spoke
+    environment:
+      - HUB_URL=hub:13021
+      - THREADS=4
+    container_name: spoke_5
+    networks:
+      - compute_network
+
 
 networks:
   compute_network:

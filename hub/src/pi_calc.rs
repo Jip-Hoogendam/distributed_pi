@@ -114,6 +114,14 @@ fn fast_bin_split(
                             ));
                             dispatched_tasks += 1;
                             return true;
+                        }else if range_end == * cmp_begin{
+                            let _ = task_dispatch.send(TaskPass::Compute(
+                                recived.clone(),
+                                compare.clone(),
+                                (range_begin, *cmp_end),
+                            ));
+                            dispatched_tasks += 1;
+                            return true;
                         }
                         false
                     }
@@ -122,34 +130,6 @@ fn fast_bin_split(
                     compute_results.swap_remove(*pos);
                 } else {
                     compute_results.push(TaskPass::Result(recived, (range_begin, range_end)));
-                    if compute_results.len() >= 2{
-                        'outer: for i in 0..compute_results.len() {
-                            if let TaskPass::Result(left_data, (left_start, left_end)) = &compute_results[i] {
-                                for j in 0..compute_results.len() {
-                                    if i == j {
-                                        continue;
-                                    }
-                                    if let TaskPass::Result(right_data, (right_start, right_end)) = &compute_results[j] {
-                                        if *left_end == *right_start {
-                                            // Found a matching pair, dispatch Compute
-                                            let _ = task_dispatch.send(TaskPass::Compute(
-                                                left_data.clone(),
-                                                right_data.clone(),
-                                                (*left_start, *right_end),
-                                            ));
-                                            dispatched_tasks += 1;
-
-                                            // Remove the used entries (ensure i > j so swap_remove is safe)
-                                            let (first, second) = if i > j { (i, j) } else { (j, i) };
-                                            compute_results.swap_remove(first);
-                                            compute_results.swap_remove(second);
-                                            break 'outer;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             }else{
                 println!("unkown error ?");
@@ -173,15 +153,14 @@ fn chudnovsky(
     task_return: &crossbeam_channel::Receiver<TaskPass>,
     chunk_size: usize,
 ) -> rug::Float {
-    let (_p1n, q1n,mut r1n) = fast_bin_split(n/10, task_dispatch, task_return, chunk_size);
+    let (_p1n, q1n,r1n) = fast_bin_split(n/13, task_dispatch, task_return, chunk_size);
 
     let bits = (n as f64 * f64::consts::LOG2_10 + 16.0).ceil() as u32;
 
-    let c      = 426880;
-    let sqrt05 = Float::with_val(bits, 10005).sqrt();
-    r1n += 13591409 * &q1n;
 
-    c * sqrt05 / unsafe { Rational::from_canonical(r1n, q1n) }
+    let c = Float::with_val(bits, 10005).sqrt() * 426880;
+
+    c  / unsafe { Rational::from_canonical(13591409 * &q1n + r1n, q1n) }
 }
 
 #[derive(Serialize, Clone)]
