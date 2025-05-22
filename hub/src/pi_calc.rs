@@ -1,12 +1,9 @@
 //module for the calculation of pi
 
 use core::f64;
-use std::io::Empty;
-
-use actix_web::cookie::time;
 use rug::{Float, Integer, Rational};
 use serde::{Deserialize, Serialize};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::sync::mpsc::TryRecvError;
 use std::time::{Duration, SystemTime};
 
@@ -19,7 +16,7 @@ use crossbeam_channel::unbounded;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
-use std::thread::{self, Thread};
+use std::thread;
 
 //for possible compatibility issues
 const API_VERSION: usize = 4;
@@ -35,14 +32,6 @@ enum TaskPass {
     ),
     Result((Integer, Integer, Integer), (i128, i128)), //finilazation chunk of data
     AWK,
-}
-
-struct Connection {
-    handeler: thread::JoinHandle<()>,
-    threads: u16,
-    id: usize,
-    tasks: usize,
-    sending: bool,
 }
 
 #[derive(Deserialize)]
@@ -95,15 +84,13 @@ fn fast_bin_split(
                 .send(TaskPass::Range(
                     (i * chunksize) as i128 + 1,
                     ((i + 1) * chunksize) as i128,
-                ))
-                .unwrap();
+                )).unwrap();
         } else {
             task_dispatch
                 .send(TaskPass::Range(
                     (i * chunksize) as i128,
                     ((i + 1) * chunksize) as i128,
-                ))
-                .unwrap();
+                )).unwrap();
         }
     }
 
@@ -117,15 +104,7 @@ fn fast_bin_split(
                 dispatched_tasks -= 1;
                 if let Some(pos) = &compute_results.iter().position(|x| match x {
                     TaskPass::Result(compare, (cmp_begin, cmp_end)) => {
-                        if range_end == *cmp_begin {
-                            let _ = task_dispatch.send(TaskPass::Compute(
-                                recived.clone(),
-                                compare.clone(),
-                                (range_begin, *cmp_end),
-                            ));
-                            dispatched_tasks += 1;
-                            return true;
-                        } else if *cmp_end == range_begin {
+                        if *cmp_end == range_begin {
                             let _ = task_dispatch.send(TaskPass::Compute(
                                 compare.clone(),
                                 recived.clone(),
@@ -168,14 +147,13 @@ fn chudnovsky(
     println!("finelizing!");
     let bits = (n as f64 * f64::consts::LOG2_10 + 16.0).ceil() as u32;
 
-    let c = 426880;
+    let c      = Float::with_val(bits, 426880);
     let sqrt05 = Float::with_val(bits, 10005).sqrt();
 
     // build the rational (13591409·q + r) / q
     let denom_rat = Rational::from((13591409 * q1n.clone() + r1n, q1n));
-    let denom_f = Float::with_val(bits, denom_rat);
-
-    println!("almost done !");
+    let denom_f   = Float::with_val(bits, denom_rat);
+    println!("last step!");
     c * sqrt05 / denom_f
 }
 
@@ -213,9 +191,6 @@ pub enum PiCalcSignal {
 //function for running the hub connector
 pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<PiCalcSignal>) {
     let listener = TcpListener::bind("0.0.0.0:13021").unwrap();
-
-    //used to store the connections
-    let mut connections: Vec<Connection> = vec![];
 
     listener.set_nonblocking(true).unwrap();
 
@@ -307,7 +282,7 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
         let connection_rx = connection_rx.clone();
         let connection_tx = connection_tx.clone();
 
-        let handeler = thread::spawn(move || {
+        thread::spawn(move || {
             let mut sending = false;
             let mut tasks = 0;
             loop{
@@ -352,13 +327,6 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
             }
         });
 
-        connections.push(Connection {
-            handeler,
-            threads: system_info.cores as u16,
-            id: spoke_id_counter,
-            tasks: 0,
-            sending: false,
-        });
         status_update_var.lock().unwrap().spokes.push(SpokeInfo {
             id: spoke_id_counter,
             cores: system_info.cores,
