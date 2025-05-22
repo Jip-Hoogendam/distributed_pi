@@ -170,7 +170,7 @@ fn main() {
                     Err(_) => true
                 }
             });
-            thread::sleep(Duration::from_millis(10));
+            thread::sleep(Duration::from_millis(1));
         }
         let _  = stream.shutdown(std::net::Shutdown::Both);
         println!("scoket disconected");

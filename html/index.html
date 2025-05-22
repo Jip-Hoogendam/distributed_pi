@@ -26,15 +26,25 @@
         position: absolute;
         width: 95%;
         left: 2.5%;
-        height: 40%;
+        height: 65%;
+        border-radius: 10px;
     }
 
     #spokes div{
-        background-color: white;
+        background-color: rgba(59, 59, 59, 0.575);
+        border-radius: 10px;
+        padding: 10px;
+        margin-right: 10px;
+        margin-left: 10px;
+        margin-bottom: 3px;
+    }
+
+    #spokes div h3 {
+        margin: auto;
     }
 
     #spokes div:nth-child(even){
-        background-color: aqua;
+        background-color: rgb(44, 44, 44);
     }
 
     #start_stop_button{
@@ -53,6 +63,11 @@
         bottom: 10px;
         width: 90%;
         left: 5%;
+        height: 50px;
+        background-color: rgba(59, 59, 59, 1);
+        border-radius: 10px;
+        border: none;
+        margin: 10px;
     }
 
     #spokes_container{
@@ -64,7 +79,7 @@
         padding: 10px;
         margin-top: 20px;
         top: 40%;
-        height: 50%;
+        height: 47%;
     }
 
     .config_menu{
@@ -86,6 +101,22 @@
     .config .input{
         width: 100%;
     }
+
+    input.button{
+        padding: auto;
+        margin-top: 10px;
+        background-color: rgba(59, 59, 59, 1);
+        color: #23ff06;
+        border-radius: 10px;
+        border: none;
+        height: 30px;
+        font-size: medium;
+    }
+
+    input.button:hover{
+        background-color: rgb(44, 44, 44);
+        cursor: pointer;
+    }
 </style>
 <body>
     <div id="dashboard">
@@ -99,6 +130,7 @@
                 <div class="config">
                     <h2>chunk size</h2>
                     <input class="input" type="text" id="chunk_size" oninput="update_chunksize()">
+                    <input class="input button" type="button" value="set recommended" onclick="recommended_chunksize()">
                 </div>
                 <div class="config">
                     <h2>last 20 digets</h2>
@@ -121,7 +153,7 @@
                 </div>
             </div>
             
-            <progress id="calculation_progress" value="0" max="100"></progress>
+            <progress id="calculation_progress" value="50" max="100"></progress>
         </div>
     </div>
     <script>
@@ -155,13 +187,20 @@
             })
         }
 
+        var core_count = 0;
+
+        function recommended_chunksize(){
+            let new_chunksize = Math.round(target.value / core_count);
+            chunk_size.value = new_chunksize;
+            update_chunksize();
+        }
+
         async function get_update(){
             fetch("http://localhost:8080/hub_status")
             .then((data) => data.json())
             .then((json) => {
                 let spokes_element = document.getElementById("spokes");
                 spokes_element.innerHTML = '';
-                spoke_count.innerText = "spoke count : " + json.spokes.length;
                 if(target.value != json.target && document.activeElement != target){
                     target.value = json.target;
                 }
@@ -169,6 +208,7 @@
                 if(chunk_size.value != json.chunk_size && document.activeElement != chunk_size){
                     chunk_size.value = json.chunk_size;
                 }
+                core_count = 0;
                 json.spokes.forEach(element => {
                     let new_spoke = document.createElement("div");
                     let spoke_info = document.createElement("h3");
@@ -177,6 +217,8 @@
                     if(temp_result != result.innerText){
                         result.innerText = temp_result;
                     }
+                    
+                    core_count += element.cores;
 
                     let temp_time = (json.duration ?? "not started");
                     if(temp_time != time.innerText){
@@ -185,7 +227,8 @@
                     new_spoke.append(spoke_info)
                     spokes_element.append(new_spoke);
                 });
-
+                
+                spoke_count.innerText = "spoke count : " + json.spokes.length + " core count : " + core_count;
 
             })
         }
