@@ -1,14 +1,22 @@
-FROM debian:bookworm-slim
+FROM rust:alpine AS builder
+
+WORKDIR /usr/build/
+
+RUN apk add gmp-dev mpc1-dev mpfr-dev musl-dev diffutils m4 make gcc
+
+COPY . .
+
+RUN cargo build --release
+
+FROM alpine
+
 
 WORKDIR /usr/bin/
 
-RUN apt-get update && apt-get install -y \
-    libmpc-dev \
-    libgmp-dev \
-    libmpfr-dev \
- && rm -rf /var/lib/apt/lists/*
+RUN apk add gmp-dev mpc1-dev mpfr-dev
 
-COPY target/release/distributed_pi_project_hub ./hub
+COPY --from=builder /usr/build/target/release/distributed_pi_project_hub ./hub
+
 
 EXPOSE 8080
 EXPOSE 13021

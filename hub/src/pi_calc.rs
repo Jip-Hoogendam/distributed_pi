@@ -153,14 +153,28 @@ fn chudnovsky(
     task_return: &crossbeam_channel::Receiver<TaskPass>,
     chunk_size: usize,
 ) -> rug::Float {
+
+    let now = SystemTime::now();
     let (_p1n, q1n,r1n) = fast_bin_split(n/13, task_dispatch, task_return, chunk_size);
+    println!("bin split took : {}", now.elapsed().expect("unexpected time error").as_secs_f64());
 
+    let now = SystemTime::now();
     let bits = (n as f64 * f64::consts::LOG2_10 + 16.0).ceil() as u32;
+    println!("precision calc took : {}", now.elapsed().expect("unexpected time error").as_secs_f64());
 
+    let now = SystemTime::now();
+    let c  =  Float::with_val(bits, 10005).sqrt() *  426880;
+    println!("c took : {}", now.elapsed().expect("unexpected time error").as_secs_f64());
 
-    let c = Float::with_val(bits, 10005).sqrt() * 426880;
+    let now = SystemTime::now();
+    let rat = unsafe { Rational::from_canonical(13591409 * &q1n + r1n, q1n) };
+    println!("rat took : {}", now.elapsed().expect("unexpected time error").as_secs_f64());
 
-    c  / unsafe { Rational::from_canonical(13591409 * &q1n + r1n, q1n) }
+    let now = SystemTime::now();
+    let result = c  / rat;
+    println!("result took : {}", now.elapsed().expect("unexpected time error").as_secs_f64());
+
+    result
 }
 
 #[derive(Serialize, Clone)]
@@ -237,10 +251,11 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
                 runner_update.lock().unwrap().status = PiCalcStatus::Running;
                 let now = SystemTime::now();
                 let target = runner_update.lock().unwrap().target;
-                let calculated_pi = chudnovsky(target, &task_tx, &task_rx, chunk_size).to_string();
+                let calculated_pi = chudnovsky(target, &task_tx, &task_rx, chunk_size);
                 let duration = now.elapsed().expect("unexpected time error");
                 runner_update.lock().unwrap().status = PiCalcStatus::Stopped;
 
+                let calculated_pi = calculated_pi.to_string();
                 let calculated_pi = calculated_pi
                     .char_indices()
                     .nth_back(22)

@@ -8,6 +8,8 @@ a project to calculuate pi on multiple servers at the same time. uses the chudno
 # pc-chunked 6 clients 4 cores chunksize 1000000 : 269.477002316 for 100 mil
 # pc-chunked 5 clients 4 cores chunksize 1000000 : 107.464075386 for 100 mil //not to be compared to prev
 # pc-chunked 5 clients 4 cores chunksize 400000 : 110.05791878 for 100 mil 
+# cluster-chunked 6 clients 4 cores chunksize 320513 : 202.691037344 for 100 mil 
+# cluster-chunked 6 clients 4 cores 1 clients 16 cores chunksize 192308 : 206.438087832 for 100 mil 
 
 future improvements.
 

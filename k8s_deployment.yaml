@@ -1,0 +1,181 @@
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  selector:
+    matchLabels:
+      app: pi_calculator
+      tag: frontend
+  template:
+    metadata:
+      labels:
+        app: pi_calculator
+        tag: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: gitea.glad0s.servers/jip/pi_calc_frontend:latest
+        ports:
+        - containerPort: 80
+          name: frontend-http
+        imagePullPolicy: "Always"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  selector:
+    app: pi_calculator
+    tag: frontend
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: frontend-http
+
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pi-calculator-web-frontend
+  labels:
+    name: pi-calculator-web-frontend
+spec:
+  rules:
+  - host: pi-calculator.cluster
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/"
+        backend:
+          service:
+            name: frontend
+            port: 
+              number: 80
+
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hub
+spec:
+  selector:
+    matchLabels:
+      app: pi_calculator
+      tag: hub
+  template:
+    metadata:
+      labels:
+        app: pi_calculator
+        tag: hub
+    spec:
+      containers:
+      - name: hub
+        image: gitea.glad0s.servers/jip/pi_calc_hub:latest
+        ports:
+        - containerPort: 13021
+          name: task-port
+        - containerPort: 8080
+          name: http
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hub-http
+spec:
+  selector:
+    app: pi_calculator
+    tag: hub
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: http
+
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pi-calculator-web-hub
+  labels:
+    name: pi-calculator-web-hub
+spec:
+  rules:
+  - host: api.pi-calculator.cluster
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/"
+        backend:
+          service:
+            name: hub-http
+            port: 
+              number: 80
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hub
+spec:
+  selector:
+    app: pi_calculator
+    tag: hub
+  ports:
+  - protocol: TCP
+    port: 13021
+    targetPort: task-port
+
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodeport-pi-calculator
+spec:
+  type: NodePort
+  selector:
+    app: pi_calculator
+    tag: hub
+  ports:
+    - port: 13021
+      # By default and for convenience, the `targetPort` is set to
+      # the same value as the `port` field.
+      targetPort: task-port
+
+
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spokes
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: spokes
+  template:
+    metadata:
+      labels:
+        app: spokes
+    spec:
+      containers:
+      - name: spokes
+        image: gitea.glad0s.servers/jip/pi_calc_spoke:latest
+        env: 
+          - name: HUB_URL
+            value: hub:13021
+          - name: THREADS
+            value: "4"
+        imagePullPolicy: "Always"
