@@ -164,7 +164,7 @@
             if(!started){
                 start_stop_button.innerText = "STOP!";
                 start_stop_button.style.backgroundColor = "#FF0606";
-                fetch(`http://api.pi-calculator.cluster/start`,{
+                fetch(`http://localhost:8080/start`,{
                     method: "POST",
                 })
             }else{
@@ -176,13 +176,13 @@
         }
 
         function update_target(){
-            fetch(`http://api.pi-calculator.cluster/update_target?new=${target.value}`,{
+            fetch(`http://localhost:8080/update_target?new=${target.value}`,{
                 method: "POST",
             })
         }
 
         function update_chunksize(){
-            fetch(`http://api.pi-calculator.cluster/update_chunk_size?new=${chunk_size.value}`,{
+            fetch(`http://localhost:8080/update_chunk_size?new=${chunk_size.value}`,{
                 method: "POST",
             })
         }
@@ -196,7 +196,7 @@
         }
 
         async function get_update(){
-            fetch("http://api.pi-calculator.cluster/hub_status")
+            fetch("http://localhost:8080/hub_status")
             .then((data) => data.json())
             .then((json) => {
                 let spokes_element = document.getElementById("spokes");

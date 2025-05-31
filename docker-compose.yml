@@ -1,10 +1,30 @@
 services:
 
+  frontend:
+    image: nginx
+    volumes:
+      - ./html/:/usr/share/nginx/html/
+    ports:
+      - 80:80
+    container_name: frontend
+    networks:
+      - compute_network
+
+  hub:
+    build:
+      context: ./hub
+    ports:
+      - 8080:8080
+      - 13021:13021
+    container_name: hub
+    networks:
+      - compute_network
+
   spoke:
     build:
       context: ./spoke
     environment:
-      - HUB_URL=cluster.servers:31668
+      - HUB_URL=hub:13021
       - THREADS=16
     container_name: spoke
     networks:

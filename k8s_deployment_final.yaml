@@ -1,0 +1,25 @@
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spokes
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: spokes
+  template:
+    metadata:
+      labels:
+        app: spokes
+    spec:
+      containers:
+      - name: spokes
+        image: gitea.glad0s.servers/jip/pi_calc_spoke:latest
+        env: 
+          - name: HUB_URL
+            value: nyarch.puter:13021
+          - name: THREADS
+            value: "4"
+        imagePullPolicy: "Always"

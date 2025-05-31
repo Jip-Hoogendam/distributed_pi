@@ -57,7 +57,8 @@ async fn main()-> std::io::Result<()>{
 
     HttpServer::new(move ||{
         let cors = Cors::default()
-            .allowed_origin("http://pi-calculator.cluster");
+            .allowed_origin("http://pi-calculator.cluster")
+            .allowed_origin("http://localhost");
         App::new()
             .wrap(cors)
             .app_data(signal_tx.clone())

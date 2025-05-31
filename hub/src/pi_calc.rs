@@ -53,7 +53,7 @@ fn bin_split(a: i128, b: i128) -> (rug::Integer, rug::Integer, rug::Integer) {
         let m = (a + b) / 2;
         let (pam, qam, ram) = bin_split(a, m);
         let (pmb, qmb, rmb) = bin_split(m, b);
-
+        
         let pab = &pam * pmb;
         let qab = qam * &qmb;
         let rab = qmb * ram + pam * rmb;
@@ -176,6 +176,7 @@ fn chudnovsky(
 
     result
 }
+
 
 #[derive(Serialize, Clone)]
 pub enum PiCalcStatus {
