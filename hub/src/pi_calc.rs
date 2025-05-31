@@ -6,7 +6,7 @@ use std::io::Write;
 use rug::{Float, Integer, Rational};
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
-use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, SystemTime};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -14,7 +14,7 @@ struct ComputeResult {
     result: (Integer, Integer, Integer),
 }
 
-use crossbeam_channel::unbounded;
+use crossbeam_channel::{unbounded, Sender};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
@@ -188,7 +188,7 @@ pub enum PiCalcStatus {
 
 #[derive(Serialize, Clone)]
 pub struct SpokeInfo {
-    id: usize,
+    id: isize,
     cores: usize,
 }
 
@@ -209,6 +209,60 @@ pub enum PiCalcSignal {
     Pause,
 }
 
+fn computation_handeler(task: TaskPass, threads: &mut Vec<thread::JoinHandle<()>>, return_channels: &mut Vec<Receiver<TaskPass>>){
+    match task{
+        TaskPass::Compute((pam, qam, ram), (pmb, qmb, rmb), range) => {
+            let (tx,rx) = mpsc::channel();
+            return_channels.push(rx);
+            threads.push(thread::spawn(move || {
+                println!("got task with range: {:?}", range);
+                let pab = &pam * pmb;
+                let qab = qam * &qmb;
+                let rab = qmb * ram + pam * rmb;
+                tx.send(TaskPass::Result((pab, qab, rab), range)).unwrap();
+            }));
+        },
+        TaskPass::Range(begin, end) => {
+            let (tx,rx) = mpsc::channel();
+            return_channels.push(rx);
+            threads.push(thread::spawn(move || {
+                println!("got task with range: {:?}", (begin, end));
+                let result = bin_split(begin, end);
+                tx.send(TaskPass::Result(result, (begin, end))).unwrap();
+            }));
+        },
+        TaskPass::Result(_,_) => panic!("hub shuld never send result"),
+        TaskPass::AWK => (),
+    }
+}
+
+
+fn hub_thread(rx: crossbeam_channel::Receiver<TaskPass>, tx: crossbeam_channel::Sender<TaskPass>){
+    let mut tasks = 0;
+    let mut return_channels: Vec<Receiver<TaskPass>> = vec![];
+    let mut threads: Vec<thread::JoinHandle<()>> = vec![];
+    loop{
+        if !rx.is_empty() && tasks <= 16{
+            let task = rx.recv().unwrap();
+            computation_handeler(task, &mut threads, &mut return_channels);
+            tasks += 1;
+        }
+
+        return_channels.retain(|channel| {
+            match channel.try_recv() {
+                Ok(value) => {
+                    //block until we can continue
+                    let _ = tx.send(value);
+                    tasks -= 1;
+                    false
+                }
+                Err(_) => true
+            }
+        });
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
 //function for running the hub connector
 pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<PiCalcSignal>) {
     let listener = TcpListener::bind("0.0.0.0:13021").unwrap();
@@ -221,6 +275,18 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
 
     let (task_tx, connection_rx) = unbounded();
     let (connection_tx, task_rx) = unbounded();
+
+    let clone_rx = connection_rx.clone();
+    let clone_tx = connection_tx.clone();
+
+    thread::spawn(move || {
+        hub_thread(clone_rx, clone_tx);
+    });
+
+    status_update_var.lock().unwrap().spokes.push(SpokeInfo {
+        id: -1,
+        cores: 16,
+    });
 
     //waits for connections
     loop {
@@ -345,7 +411,7 @@ pub fn hub_runner(status_update_var: Arc<Mutex<PiCalcUpdate>>, singal: Receiver<
                         }
                     }
                 }
-                thread::sleep(Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(20));
             }
         });
 

@@ -20,15 +20,45 @@ services:
     networks:
       - compute_network
 
-  spoke:
-    build:
-      context: ./spoke
-    environment:
-      - HUB_URL=hub:13021
-      - THREADS=16
-    container_name: spoke
-    networks:
-      - compute_network
+  # spoke:
+  #   build:
+  #     context: ./spoke
+  #   environment:
+  #     - HUB_URL=hub:13021
+  #     - THREADS=4
+  #   container_name: spoke1
+  #   networks:
+  #     - compute_network
+  
+  # spoke-2:
+  #   build:
+  #     context: ./spoke
+  #   environment:
+  #     - HUB_URL=hub:13021
+  #     - THREADS=4
+  #   container_name: spoke2
+  #   networks:
+  #     - compute_network
+
+  # spoke-3:
+  #   build:
+  #     context: ./spoke
+  #   environment:
+  #     - HUB_URL=hub:13021
+  #     - THREADS=4
+  #   container_name: spoke3
+  #   networks:
+  #     - compute_network
+
+  # spoke-4:
+  #   build:
+  #     context: ./spoke
+  #   environment:
+  #     - HUB_URL=hub:13021
+  #     - THREADS=4
+  #   container_name: spoke4
+  #   networks:
+  #     - compute_network
 
 
 networks:
